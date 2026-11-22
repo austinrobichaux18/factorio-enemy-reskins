@@ -1,11 +1,22 @@
-local function show_message(event)
-    if not settings.global["startup-message-setting"].value then
-        return
-    end
-    game.print(
-        "Thanks for using Enemy Reskins. This mod adds MANY choices of skins for enemies that is all configurable in Settings > Mod Settings > Startup > Enemy Reskins. You will need to leave the world and restart to apply the changes. You can also disable this message there (in Map instead of Startup, no restart required). Enjoy :)"
-    )
-    script.on_event(defines.events.on_player_changed_position, nil)
+-- Prints a one-time welcome message to each player, gated by the runtime-global startup-message-setting.
+-- Handlers are registered unconditionally (never removed mid-game) so multiplayer peers stay in sync.
+local MESSAGE = "Thanks for using Enemy Reskins. Pick skins in Settings > Mod Settings > Startup > Enemy Reskins "
+    .. "(restart required). You can turn this message off under Map settings."
+
+local function welcome(player)
+    if not player or not settings.global["startup-message-setting"].value then return end
+    storage.welcomed = storage.welcomed or {}
+    if storage.welcomed[player.index] then return end
+    storage.welcomed[player.index] = true
+    player.print(MESSAGE)
 end
 
-script.on_event(defines.events.on_player_changed_position, show_message)
+local function welcome_all()
+    for _, player in pairs(game.players) do welcome(player) end
+end
+
+script.on_init(welcome_all)
+script.on_configuration_changed(welcome_all)
+script.on_event(defines.events.on_player_created, function(event)
+    welcome(game.get_player(event.player_index))
+end)

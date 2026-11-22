@@ -1,138 +1,80 @@
-require('helpers/common')
+-- Reskins biter/spitter units and their corpses from graphics/units/<skin>.png
+-- (162px cells, 8 directions, line_length 3; corpses 128px, 4 directions, line_length 2).
+local common = require("helpers/common")
+local constants = require("helpers/constants")
 
-small_biter = data.raw["unit"]["small-biter"]
-medium_biter = data.raw["unit"]["medium-biter"]
-big_biter = data.raw["unit"]["big-biter"]
-behemoth_biter = data.raw["unit"]["behemoth-biter"]
+local units = {}
 
-small_biter_scale = 0.3
-medium_biter_scale = 0.5
-big_biter_scale = 1.0
-behemoth_biter_scale = 1.5
+units.scale = {
+    biter = { small = 0.3, medium = 0.5, big = 1.0, behemoth = 1.5 },
+    spitter = { small = 0.3, medium = 0.5, big = 0.6, behemoth = 0.8 },
+}
 
-
-small_spitter = data.raw["unit"]["small-spitter"]
-medium_spitter = data.raw["unit"]["medium-spitter"]
-big_spitter = data.raw["unit"]["big-spitter"]
-behemoth_spitter = data.raw["unit"]["behemoth-spitter"]
-
-small_spitter_scale = 0.3
-medium_spitter_scale = 0.5
-big_spitter_scale = .6
-behemoth_spitter_scale = .8
-
----@param enemy_unit data.UnitPrototype
----@param filesuffix string
-function update_unit(enemy_unit, scale, filesuffix)
-    local filename = "__enemy-reskins__/graphics/units/" .. filesuffix
-    if not enemy_unit then return end
-    local unit_type = enemy_unit.name:find("biter") and "biter" or (enemy_unit.name:find("spitter") and "spitter" or nil)
-
-    local animation_walk = {
-        layers = {
-            {
-                filename = filename,
-                width = 162,
-                height = 162,
-                frame_count = 1,
-                direction_count = 8,
-                line_length = 3,
-                scale = scale_modifier(scale, unit_type .. "-scale-setting")
-            }
-        }
-    }
-
-    local animation_spin = {
-        layers = {
-            {
-                filename = filename,
-                width = 162,
-                height = 162,
-                frame_count = 8,
-                line_length = 3,
-                scale = scale_modifier(scale, unit_type .. "-scale-setting")
-            }
-        }
-    }
-
-    enemy_unit.run_animation = animation_walk
-    enemy_unit.attack_parameters.animation = animation_spin
-
-    -- IMPORTANT: remove vanilla frame sequencing (it causes out-of-range errors)
-    enemy_unit.alternative_attacking_frame_sequence = nil
-
-    local corpse_file_name = filename:gsub("%.png$", "_corpse.png")
-    if filesuffix:find("titan") then
-        corpse_file_name = filename:gsub("[^/\\]+%.png$", "titan_corpse.png")
+-- The chosen skin per tier for kind "biter" or "spitter".
+function units.skins(kind)
+    local skins = {}
+    for _, tier in ipairs(constants.tiers) do
+        skins[tier] = settings.startup[tier .. "-" .. kind .. "-skin-setting"].value
     end
+    return skins
+end
 
-    local corpse = data.raw["corpse"][enemy_unit.corpse]
-    local corpse_animation = {
-        layers = {
-            {
-                --replace the .png part with _corpse.png
-                filename = corpse_file_name,
-                width = 128,
-                height = 128,
-                frame_count = 1,
-                direction_count = 4,
-                line_length = 2,
-                shift = util.by_pixel(0, 0),
-                scale = scale_modifier(scale, unit_type .. "-scale-setting"),
-            }
-        }
+-- Returns true when the unit was reskinned (false for a missing unit or the 'default' skin).
+---@param unit data.UnitPrototype
+function units.update_unit(unit, kind, base_scale, skin)
+    if not unit or skin == "default" then return false end
+    local scale = common.scaled(base_scale, kind)
+    local filename = "__enemy-reskins__/graphics/units/" .. skin .. ".png"
+
+    unit.run_animation = { layers = { {
+        filename = filename, width = 162, height = 162,
+        frame_count = 1, direction_count = 8, line_length = 3, scale = scale,
+    } } }
+    -- The attack animation reuses the sheet as an 8-frame spin.
+    unit.attack_parameters.animation = { layers = { {
+        filename = filename, width = 162, height = 162,
+        frame_count = 8, line_length = 3, scale = scale,
+    } } }
+    -- Vanilla frame sequencing indexes frames the new sheet doesn't have.
+    unit.alternative_attacking_frame_sequence = nil
+
+    local corpse = data.raw["corpse"][unit.corpse]
+    if corpse then
+        -- Every titan skin shares titan_corpse.png.
+        local corpse_skin = skin:find("titan", 1, true) and "titan" or skin
+        local anim = { layers = { {
+            filename = "__enemy-reskins__/graphics/units/" .. corpse_skin .. "_corpse.png",
+            width = 128, height = 128,
+            frame_count = 1, direction_count = 4, line_length = 2, scale = scale,
+        } } }
+        corpse.animation = anim
+        corpse.decay_animation = anim
+        corpse.direction_shuffle = nil
+    end
+    return true
+end
+
+local function set_kind(kind)
+    local skins = units.skins(kind)
+    local colors = common.tint_colors
+    -- {color, brightness} per tier; big turns blue only when it shares medium's skin.
+    local tints = {
+        small = { colors.small, 0.6 },
+        medium = { colors.medium_same_troop },
+        big = { skins.medium == skins.big and colors.big or colors.small },
+        behemoth = { colors.medium },
     }
-    corpse.animation = corpse_animation
-    corpse.decay_animation = corpse_animation
-
-    -- Fix direction-related data from vanilla corpse
-    corpse.direction_shuffle = nil
+    for _, tier in ipairs(constants.tiers) do
+        local unit = data.raw["unit"][tier .. "-" .. kind]
+        if units.update_unit(unit, kind, units.scale[kind][tier], skins[tier]) then
+            common.tint_unit(unit, tints[tier][1], true, tints[tier][2])
+        end
+    end
 end
 
-function set_biters()
-    local small_biter_skin = settings.startup["small-biter-skin-setting"].value
-    local medium_biter_skin = settings.startup["medium-biter-skin-setting"].value
-    local big_biter_skin = settings.startup["big-biter-skin-setting"].value
-    local behemoth_biter_skin = settings.startup["behemoth-biter-skin-setting"].value
-
-    update_unit(small_biter, small_biter_scale, small_biter_skin .. ".png")
-    tint(small_biter, default_small_tint_color, 0.6, true)
-
-    update_unit(medium_biter, medium_biter_scale, medium_biter_skin .. ".png")
-    tint(medium_biter, default_medium_tint_color_all_same_troop, true)
-
-    update_unit(big_biter, big_biter_scale, big_biter_skin .. ".png")
-    tint(
-        big_biter,
-        (medium_biter_skin == big_biter_skin)
-        and default_big_tint_color
-        or default_small_tint_color, true
-    )
-
-    update_unit(behemoth_biter, behemoth_biter_scale, behemoth_biter_skin .. ".png")
-    tint(behemoth_biter, default_medium_tint_color, true)
+function units.set_all()
+    set_kind("biter")
+    set_kind("spitter")
 end
 
-function set_spitters()
-    local small_spitter_skin = settings.startup["small-spitter-skin-setting"].value
-    local medium_spitter_skin = settings.startup["medium-spitter-skin-setting"].value
-    local big_spitter_skin = settings.startup["big-spitter-skin-setting"].value
-    local behemoth_spitter_skin = settings.startup["behemoth-spitter-skin-setting"].value
-
-    update_unit(small_spitter, small_spitter_scale, small_spitter_skin .. ".png")
-    tint(small_spitter, default_small_tint_color, 0.6, true)
-
-    update_unit(medium_spitter, medium_spitter_scale, medium_spitter_skin .. ".png")
-    tint(medium_spitter, default_medium_tint_color_all_same_troop, true)
-
-    update_unit(big_spitter, big_spitter_scale, big_spitter_skin .. ".png")
-    tint(
-        big_spitter,
-        (medium_spitter_skin == big_spitter_skin)
-        and default_big_tint_color
-        or default_small_tint_color, true
-    )
-
-    update_unit(behemoth_spitter, behemoth_spitter_scale, behemoth_spitter_skin .. ".png")
-    tint(behemoth_spitter, default_medium_tint_color, true)
-end
+return units

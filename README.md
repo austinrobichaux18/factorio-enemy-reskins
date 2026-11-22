@@ -27,7 +27,7 @@ This is a section of things I plan to add to this mod. This section will likely 
 - Add support for other character skins as enemy skins 
 
 ### Bugs / Issues
-- None! 
+- None known
 
 # Sprite Sheet Reorganizer
 I made a sprite sheet reorganizer simple console app as well to reorganize my sprites into factorio's order. 

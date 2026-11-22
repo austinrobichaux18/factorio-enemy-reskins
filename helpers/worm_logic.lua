@@ -1,75 +1,62 @@
-require('helpers/common')
+-- Reskins worm turrets and their corpses from graphics/worms/<skin>.png
+-- (128px cells, 8 directions, line_length 3; corpses <skin>_corpse.png, 128px, 4 directions, line_length 2).
+local common = require("helpers/common")
+local constants = require("helpers/constants")
 
-small_worm = data.raw["turret"]["small-worm-turret"]
-medium_worm = data.raw["turret"]["medium-worm-turret"]
-big_worm = data.raw["turret"]["big-worm-turret"]
-behemoth_worm = data.raw["turret"]["behemoth-worm-turret"]
+local worms = {}
 
-small_worm_scale = 1
-medium_worm_scale = 1.2
-big_worm_scale = 1.4
-behemoth_worm_scale = 2
+worms.scale = { small = 1, medium = 1.2, big = 1.4, behemoth = 2 }
 
+local animation_fields = {
+    "folded_animation", "preparing_animation", "prepared_animation", "folding_animation",
+    "attacking_animation", "ending_attack_animation", "starting_attack_animation",
+    "prepared_alternative_animation",
+}
+
+function worms.skins()
+    local skins = {}
+    for _, tier in ipairs(constants.tiers) do
+        skins[tier] = settings.startup[tier .. "-worm-skin-setting"].value
+    end
+    return skins
+end
+
+-- Returns true when the worm was reskinned (false for a missing worm or the 'default' skin).
 ---@param worm data.TurretPrototype
-function update_worm(worm, scale, filesuffix)
-    local filename = "__enemy-reskins__/graphics/worms/" .. filesuffix
-    if not worm then return end
+function worms.update_worm(worm, base_scale, skin)
+    if not worm or skin == "default" then return false end
+    local scale = common.scaled(base_scale, "worm")
+    local base = "__enemy-reskins__/graphics/worms/" .. skin
 
-    local animation = {
-        layers = {
-            {
-                filename = filename,
-                width = 128,
-                height = 128,
-                frame_count = 1,
-                direction_count = 8,
-                line_length = 3,
-                shift = util.by_pixel(0, 0),
-                scale = scale_modifier(scale, "worm-scale-setting")
-            }
-        }
-    }
-
-    worm.folded_animation = animation
-    worm.preparing_animation = animation
-    worm.prepared_animation = animation
-    worm.folding_animation = animation
-    worm.attacking_animation = animation
-    worm.energy_glow_animation = animation
-    worm.ending_attack_animation = animation
-    worm.starting_attack_animation = animation
+    local animation = { layers = { {
+        filename = base .. ".png", width = 128, height = 128,
+        frame_count = 1, direction_count = 8, line_length = 3, scale = scale,
+    } } }
+    for _, field in ipairs(animation_fields) do
+        worm[field] = animation
+    end
     worm.attack_parameters.animation = animation
-    worm.prepared_alternative_animation = animation
-    
+    -- The glow layer draws additively on top; the vanilla one doesn't fit the new sprite.
+    worm.energy_glow_animation = nil
+
     local corpse = data.raw["corpse"][worm.corpse]
-    local corpse_animation = {
-        layers = {
-            {
-                filename = filename:gsub("%.png$", ".png"),
-                width = 128,
-                height = 128,
-                frame_count = 8,
-                line_length = 3,
-                direction_count = 1,
-                scale = scale_modifier(scale, "worm-scale-setting") / 2,
-                tint = { 1, 1, 1, 0.5 }
-            }
-        }
-    }
-
-    corpse.animation = corpse_animation
-    corpse.decay_animation = corpse_animation
-    corpse.direction_shuffle = nil
+    if corpse then
+        local anim = { layers = { {
+            filename = base .. "_corpse.png", width = 128, height = 128,
+            frame_count = 1, direction_count = 4, line_length = 2, scale = scale,
+        } } }
+        corpse.animation = anim
+        corpse.decay_animation = anim
+        corpse.direction_shuffle = nil
+    end
+    return true
 end
 
-function set_all_worms()
-    local small_worm_skin = settings.startup["small-worm-skin-setting"].value
-    local medium_worm_skin = settings.startup["medium-worm-skin-setting"].value
-    local big_worm_skin = settings.startup["big-worm-skin-setting"].value
-    local behemoth_worm_skin = settings.startup["behemoth-worm-skin-setting"].value
-
-    update_worm(small_worm, small_worm_scale, small_worm_skin .. ".png")
-    update_worm(medium_worm, medium_worm_scale, medium_worm_skin .. ".png")
-    update_worm(big_worm, big_worm_scale, big_worm_skin .. ".png")
-    update_worm(behemoth_worm, behemoth_worm_scale, behemoth_worm_skin .. ".png")
+function worms.set_all()
+    local skins = worms.skins()
+    for _, tier in ipairs(constants.tiers) do
+        worms.update_worm(data.raw["turret"][tier .. "-worm-turret"], worms.scale[tier], skins[tier])
+    end
 end
+
+return worms

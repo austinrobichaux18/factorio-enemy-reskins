@@ -1,173 +1,108 @@
-require('helpers/common')
-require('helpers/unit_logic')
-require('helpers/worm_logic')
-require('helpers/spawner_logic')
+-- RampantFixed compat: reskins its tiered (-t<N>-) units, worms and spawners with the vanilla tier skins
+-- and tints each by the element in its name.
+local common = require("helpers/common")
+local units = require("helpers/unit_logic")
+local worms = require("helpers/worm_logic")
+local spawners = require("helpers/spawner_logic")
 
 local rampant_fixed = {}
 
-local enemy_tints = {
-    -- Vanilla
-    -- ["small-biter"]      = {181, 150,  64},
-    -- ["medium-biter"]     = {255, 105, 180},
-    -- ["big-biter"]        = { 64, 128, 255},
-    -- ["behemoth-biter"]   = { 32, 200,  64},
-
-    -- ["small-spitter"]    = {220, 220,  80},
-    -- ["medium-spitter"]   = {255, 140, 200},
-    -- ["big-spitter"]      = { 80, 150, 255},
-    -- ["behemoth-spitter"] = { 80, 255, 120},
-
-    -- Rampant
-    ["acid"]         = { 0, 255, 0 },     -- neon green
-    ["arachnids"]    = { 120, 60, 20 },   -- brown
-    ["electric"]     = { 0, 255, 255 },   -- cyan
-    ["energy-thief"] = { 160, 0, 255 },   -- purple
-    ["fast"]         = { 255, 255, 255 }, -- white
-    ["fire"]         = { 255, 64, 0 },    -- orange-red
-    ["inferno"]      = { 255, 0, 0 },     -- bright red
-    ["juggernaut"]   = { 96, 96, 96 },    -- dark gray
-    ["laser"]        = { 255, 0, 255 },   -- magenta
-    ["neutral"]      = { 192, 192, 192 }, -- light gray
-    ["nuclear"]      = { 128, 255, 0 },   -- radioactive lime
-    ["physical"]     = { 139, 69, 19 },   -- dark brown
-    ["poison"]       = { 128, 0, 128 },   -- violet
-    ["spawner"]      = { 255, 215, 0 },   -- gold
-    ["suicide"]      = { 255, 255, 0 },   -- bright yellow
-    ["troll"]        = { 0, 128, 255 },   -- azure
-    ["wasp"]         = { 255, 200, 0 },   -- amber
+-- Checked in order; the generic "spawner" goes last so an element keyword wins.
+local element_tints = {
+    { "acid", { 0, 255, 0 } },         -- neon green
+    { "arachnids", { 120, 60, 20 } },  -- brown
+    { "electric", { 0, 255, 255 } },   -- cyan
+    { "energy-thief", { 160, 0, 255 } }, -- purple
+    { "fast", { 255, 255, 255 } },     -- white
+    { "fire", { 255, 64, 0 } },        -- orange-red
+    { "inferno", { 255, 0, 0 } },      -- bright red
+    { "juggernaut", { 96, 96, 96 } },  -- dark gray
+    { "laser", { 255, 0, 255 } },      -- magenta
+    { "neutral", { 192, 192, 192 } },  -- light gray
+    { "nuclear", { 128, 255, 0 } },    -- radioactive lime
+    { "physical", { 139, 69, 19 } },   -- dark brown
+    { "poison", { 128, 0, 128 } },     -- violet
+    { "suicide", { 255, 255, 0 } },    -- bright yellow
+    { "troll", { 0, 128, 255 } },      -- azure
+    { "wasp", { 255, 200, 0 } },       -- amber
+    { "spawner", { 255, 215, 0 } },    -- gold
 }
 
-local function rgb_to_factorio(r, g, b, a)
-    return {
-        r / 255,
-        g / 255,
-        b / 255,
-        a or 1
-    }
-end
-local function normalize_tier_for_scaling(tier)
-    if type(tier) ~= "number" then
-        return nil
+local function element_tint(name)
+    for _, entry in ipairs(element_tints) do
+        if name:find(entry[1], 1, true) then
+            local c = entry[2]
+            return common.rgb(c[1], c[2], c[3])
+        end
     end
-
-    if tier <= 5 then
-        return tier
-    end
-
-    return 5 + ((tier - 5) * 0.5)
-    -- 1 → 1
-    -- 5 → 5
-    -- 6 → 5.5
-    -- 7 → 6
-    -- 8 → 6.5
-    -- 9 → 7
 end
 
+local function tier_of(name)
+    return tonumber(name:match("%-t(%d+)%-"))
+end
 
-function rampant_fixed.apply_compatability()
-    local small_biter_skin = settings.startup["small-biter-skin-setting"].value
-    local medium_biter_skin = settings.startup["medium-biter-skin-setting"].value
-    local big_biter_skin = settings.startup["big-biter-skin-setting"].value
-    local behemoth_biter_skin = settings.startup["behemoth-biter-skin-setting"].value
+local function size_of(tier)
+    if tier <= 2 then return "small" end
+    if tier <= 5 then return "medium" end
+    if tier <= 8 then return "big" end
+    return "behemoth"
+end
 
-    local small_spitter_skin = settings.startup["small-spitter-skin-setting"].value
-    local medium_spitter_skin = settings.startup["medium-spitter-skin-setting"].value
-    local big_spitter_skin = settings.startup["big-spitter-skin-setting"].value
-    local behemoth_spitter_skin = settings.startup["behemoth-spitter-skin-setting"].value
+-- Spawner scale grows with tier, at half rate past tier 5.
+local function spawner_scale(tier)
+    if tier <= 5 then return tier end
+    return 5 + (tier - 5) * 0.5
+end
 
+local function is_rampant(name)
+    return name:find("rampant", 1, true) ~= nil
+end
+
+function rampant_fixed.apply()
+    local unit_skins = { biter = units.skins("biter"), spitter = units.skins("spitter") }
     for name, unit in pairs(data.raw["unit"]) do
-        if name:find("rampant") then
-            local tier = tonumber(name:match("%-t(%d+)%-"))
-
+        if is_rampant(name) then
+            local tier = tier_of(name)
             if tier then
-                if name:find("biter", 1, true) then
-                    if tier <= 2 and small_biter_skin ~= "default" then
-                        update_unit(unit, small_biter_scale, small_biter_skin .. ".png")
-                    elseif tier <= 5 and medium_biter_skin ~= "default" then
-                        update_unit(unit, medium_biter_scale, medium_biter_skin .. ".png")
-                    elseif tier <= 8 and big_biter_skin ~= "default" then
-                        update_unit(unit, big_biter_scale, big_biter_skin .. ".png")
-                    elseif behemoth_biter_skin ~= "default" then
-                        update_unit(unit, behemoth_biter_scale, behemoth_biter_skin .. ".png")
-                    end
-                end
-
-                if name:find("spitter", 1, true) then
-                    if tier <= 2 and small_spitter_skin ~= "default" then
-                        update_unit(unit, small_spitter_scale, small_spitter_skin .. ".png")
-                    elseif tier <= 5 and medium_spitter_skin ~= "default" then
-                        update_unit(unit, medium_spitter_scale, medium_spitter_skin .. ".png")
-                    elseif tier <= 8 and big_spitter_skin ~= "default" then
-                        update_unit(unit, big_spitter_scale, big_spitter_skin .. ".png")
-                    elseif behemoth_spitter_skin ~= "default" then
-                        update_unit(unit, behemoth_spitter_scale, behemoth_spitter_skin .. ".png")
+                local size = size_of(tier)
+                for _, kind in ipairs({ "biter", "spitter" }) do
+                    if name:find(kind, 1, true) then
+                        units.update_unit(unit, kind, units.scale[kind][size], unit_skins[kind][size])
                     end
                 end
             end
-
-            for keyword, color in pairs(enemy_tints) do
-                if name:find(keyword) then
-                    tint(unit, rgb_to_factorio(color[1], color[2], color[3]))
-                    break
-                end
-            end
+            local color = element_tint(name)
+            if color then common.tint_unit(unit, color) end
         end
     end
 
-    local small_worm_skin = settings.startup["small-worm-skin-setting"].value
-    local medium_worm_skin = settings.startup["medium-worm-skin-setting"].value
-    local big_worm_skin = settings.startup["big-worm-skin-setting"].value
-    local behemoth_worm_skin = settings.startup["behemoth-worm-skin-setting"].value
-
+    local worm_skins = worms.skins()
     for name, turret in pairs(data.raw["turret"]) do
-        if name:find("rampant") then
-            local tier = tonumber(name:match("%-t(%d+)%-"))
-
-            if tier then
-                if name:find("worm", 1, true) then
-                    if tier <= 2 and small_worm_skin ~= "default" then
-                        update_worm(turret, small_worm_scale, small_worm_skin .. ".png")
-                    elseif tier <= 5 and medium_worm_skin ~= "default" then
-                        update_worm(turret, medium_worm_scale, medium_worm_skin .. ".png")
-                    elseif tier <= 8 and big_worm_skin ~= "default" then
-                        update_worm(turret, big_worm_scale, big_worm_skin .. ".png")
-                    elseif behemoth_worm_skin ~= "default" then
-                        update_worm(turret, behemoth_worm_scale, behemoth_worm_skin .. ".png")
-                    end
-                end
+        if is_rampant(name) then
+            local tier = tier_of(name)
+            if tier and name:find("worm", 1, true) then
+                local size = size_of(tier)
+                worms.update_worm(turret, worms.scale[size], worm_skins[size])
             end
-
-            for keyword, color in pairs(enemy_tints) do
-                if name:find(keyword) then
-                    tint_turret(turret, rgb_to_factorio(color[1], color[2], color[3]))
-                    break
-                end
-            end
+            local color = element_tint(name)
+            if color then common.tint_turret(turret, color) end
         end
     end
-
-    local biter_spawner_skin_setting = settings.startup["biter-spawner-skin-setting"].value
-    local spitter_spawner_skin_setting = settings.startup["spitter-spawner-skin-setting"].value
 
     for name, spawner in pairs(data.raw["unit-spawner"]) do
-        if name:find("rampant") then
-            local tier = tonumber(name:match("%-t(%d+)%-"))
-            tier = normalize_tier_for_scaling(tier)
-
+        if is_rampant(name) then
+            local tier = tier_of(name)
             if tier then
-                if name:find("biter", 1, true) and biter_spawner_skin_setting ~= "default" then
-                    update_spawner(spawner, tier, biter_spawner_skin_setting .. ".png")
-                elseif name:find("spitter", 1, true) and spitter_spawner_skin_setting ~= "default" then
-                    update_spawner(spawner, tier, spitter_spawner_skin_setting .. ".png")
+                for _, kind in ipairs({ "biter", "spitter" }) do
+                    if name:find(kind, 1, true) then
+                        spawners.update_spawner(spawner, spawner_scale(tier),
+                            settings.startup[kind .. "-spawner-skin-setting"].value)
+                        break
+                    end
                 end
             end
-        end
-
-        for keyword, color in pairs(enemy_tints) do
-            if name:find(keyword) then
-                tint_spawner(spawner, rgb_to_factorio(color[1], color[2], color[3]))
-                break
-            end
+            local color = element_tint(name)
+            if color then common.tint_spawner(spawner, color) end
         end
     end
 end
