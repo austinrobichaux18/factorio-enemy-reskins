@@ -5,7 +5,7 @@
   "author": "Twiggy9858",
   "homepage": "https://github.com/austinrobichaux18/biter-reskins",
   "description": "Gives various fun options for reskinning the enemies",
-  "factorio_version": "2.0",
+  "factorio_version": "2.1",
   "dependencies": [
     "base",
     "? RampantFixed",
